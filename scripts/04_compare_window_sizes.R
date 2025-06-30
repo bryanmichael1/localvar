@@ -15,6 +15,7 @@ library(stringr)
 devtools::load_all()
 
 cat("=== COMPARING ALL WINDOW SIZES ===\n")
+cat("This script extends script 03 by running single-window analysis for ALL windows\n\n")
 
 # ========================================
 # SETTINGS
@@ -97,12 +98,18 @@ for (i in seq_along(window_sizes)) {
   })
 }
 
-cat("\n✅ ANALYSIS COMPLETE FOR ALL WINDOW SIZES!\n")
-cat("Generated detailed analysis for", nrow(summary_data), "window sizes\n\n")
+cat("\n📊 ANALYSIS SUMMARY:\n")
+cat("==========================================\n")
+cat("Successfully analyzed", length(window_sizes), "window sizes:\n")
+for (i in seq_len(min(5, nrow(summary_data)))) {
+  row <- summary_data[i, ]
+  cat(sprintf("  Window %3d: R² = %6.4f, %d data points\n", 
+             row$window_size, row$model_rsq, row$n_datapoints))
+}
 
 # Save the comprehensive summary
 write.csv(summary_data, "results/multi_window_reliability_summary.csv", row.names = FALSE)
-cat("💾 Saved comprehensive summary: multi_window_reliability_summary.csv\n\n")
+cat("\n💾 Saved comprehensive summary: multi_window_reliability_summary.csv\n")
 
 # ========================================
 # DISPLAY COMPARISON SUMMARY
