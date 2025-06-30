@@ -1,1 +1,32 @@
+# R Project Files
 .Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Temporary Files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# Output Files (keep data but ignore temp outputs)
+temp_*
+test_*
+*.log
+*.bak
+
+# Analysis Results (comment out if you want to track these)
+# *.rds
+# plots/
+# *.csv
+
+# IDE Files
+.vscode/
+.idea/
+
+# System Files
+*.swp
+*.swo
+*#

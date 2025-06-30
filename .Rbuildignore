@@ -1,3 +1,10 @@
 ^localvar\.Rproj$
 ^\.Rproj\.user$
+^README\.md$
+^\.git$
+^\.gitignore$
 ^script$
+^plots$
+^temp_.*
+^test_.*
+^simulated_results_.*\.rds$

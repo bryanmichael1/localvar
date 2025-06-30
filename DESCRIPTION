@@ -1,11 +1,20 @@
 Package: localvar
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
+Title: Local Volatility Analysis with Sliding Window Approaches
+Version: 2.0.0
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Diemithry", "Kloppenburg", , "diemithrykloppenburg@hotmail.com", role = c("aut", "cre"))
+Description: An R package for analyzing local volatility patterns in data using 
+    sliding window approaches and reliability zone estimation. Optimized for 
+    memory-efficient analysis on Mac M3 systems with comprehensive batch processing
+    and visualization capabilities.
+License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
+Depends: R (>= 4.0.0)
+Imports: 
+    data.table,
+    dplyr,
+    ggplot2,
+    stats,
+    utils
