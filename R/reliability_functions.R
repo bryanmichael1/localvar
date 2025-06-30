@@ -445,8 +445,9 @@ print_reliability_summary <- function(window_size, metrics) {
 #' @param window_size The window size to analyze
 #' @param detailed_results The detailed results from multi-window analysis 
 #' @param output_prefix Prefix for output files (default: "single_window")
+#' @param reliability_thresholds Vector of reliability thresholds (default: c(0.95, 0.90, 0.85, 0.80))
 #' @return List with plot objects and summary information
-generate_single_window_analysis <- function(window_size, detailed_results = NULL, output_prefix = "single_window") {
+generate_single_window_analysis <- function(window_size, detailed_results = NULL, output_prefix = "single_window", reliability_thresholds = c(0.95, 0.90, 0.85, 0.80)) {
   
   cat("=== SINGLE WINDOW ANALYSIS: SIZE", window_size, "===\n")
   
@@ -468,6 +469,18 @@ generate_single_window_analysis <- function(window_size, detailed_results = NULL
   window_data <- detailed_results[[window_key]]
   cat("✓ Found data for window size", window_size, "\n")
   cat("  - Data points:", length(window_data$x_z_data), "\n")
+  
+  # Calculate reliability zones if not already present
+  if (!"zones" %in% names(window_data)) {
+    cat("  - Calculating reliability zones...\n")
+    zone_analysis <- calculate_reliability_zones(
+      window_data$x_z_data, 
+      window_data$score_sd_data, 
+      reliability_thresholds
+    )
+    window_data <- c(window_data, zone_analysis)
+  }
+  
   cat("  - Model R²:", round(window_data$model_rsq, 4), "\n")
   cat("  - Baseline volatility:", round(window_data$baseline_volatility, 4), "\n")
   

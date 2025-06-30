@@ -21,10 +21,14 @@ cat("=== COMPARING ALL WINDOW SIZES ===\n")
 # SETTINGS
 # ========================================
 
+# Reliability thresholds for analysis
+RELIABILITY_THRESHOLDS <- c(0.95, 0.90, 0.85, 0.80)  # You can modify these
+
 # Input files (from Step 2)
 DETAILED_FILE <- "data/multi_window_reliability_detailed.rds"
 SUMMARY_FILE <- "results/multi_window_reliability_summary.csv"
 
+cat("Reliability thresholds:", paste(RELIABILITY_THRESHOLDS * 100, collapse = "%, "), "%\n")
 cat("Reading from:", SUMMARY_FILE, "\n\n")
 
 # ========================================
@@ -213,7 +217,8 @@ if ("zone_90pct_width" %in% names(summary_table)) {
     tryCatch({
       optimal_analysis <- generate_single_window_analysis(
         window_size = optimal_window,
-        output_prefix = "optimal_window"
+        output_prefix = "optimal_window",
+        reliability_thresholds = RELIABILITY_THRESHOLDS
       )
       
       cat("✓ Generated detailed plots and report for optimal window size\n")

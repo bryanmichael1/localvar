@@ -21,11 +21,15 @@ cat("=== SINGLE WINDOW DEEP-DIVE ANALYSIS ===\n")
 # Which window size to analyze in detail
 WINDOW_SIZE <- 20  # Change this to analyze different window sizes
 
+# Reliability thresholds for zone analysis
+RELIABILITY_THRESHOLDS <- c(0.95, 0.90, 0.85, 0.80)  # You can modify these
+
 # Input files
 DETAILED_FILE <- "data/multi_window_reliability_detailed.rds"
 SUMMARY_FILE <- "results/multi_window_reliability_summary.csv"
 
 cat("Analyzing window size:", WINDOW_SIZE, "\n")
+cat("Reliability thresholds:", paste(RELIABILITY_THRESHOLDS * 100, collapse = "%, "), "%\n")
 cat("Reading from:", DETAILED_FILE, "\n\n")
 
 # ========================================
@@ -37,7 +41,8 @@ cat("Running detailed analysis for window size", WINDOW_SIZE, "...\n")
 # Use the shared function to generate comprehensive analysis
 analysis_results <- generate_single_window_analysis(
   window_size = WINDOW_SIZE,
-  output_prefix = "single_window"
+  output_prefix = "single_window",
+  reliability_thresholds = RELIABILITY_THRESHOLDS
 )
 
 # ========================================

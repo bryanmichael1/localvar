@@ -39,9 +39,6 @@ MAX_DATASETS <- 100  # e.g., 500 to use first 500 datasets, or NULL for all
 # Window sizes to test (you can add/remove sizes)
 WINDOW_SIZES <- c(3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100)
 
-# Reliability thresholds to calculate zones for
-RELIABILITY_THRESHOLDS <- c(0.95, 0.90, 0.85, 0.80, 0.75, 0.70)
-
 # Output files
 OUTPUT_DETAILED <- "data/multi_window_reliability_detailed.rds"
 OUTPUT_SUMMARY <- "results/multi_window_reliability_summary.csv"
@@ -53,7 +50,6 @@ cat("Settings:\n")
 cat("- Input file:", INPUT_FILE, "\n")
 cat("- Max datasets:", ifelse(is.null(MAX_DATASETS), "All", MAX_DATASETS), "\n")
 cat("- Window sizes:", paste(WINDOW_SIZES, collapse = ", "), "\n")
-cat("- Reliability thresholds:", paste(RELIABILITY_THRESHOLDS * 100, collapse = "%, "), "%\n")
 cat("- Batch size:", BATCH_SIZE, "\n\n")
 
 # ========================================
