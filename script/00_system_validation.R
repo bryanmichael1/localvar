@@ -94,6 +94,23 @@ if (length(all_x_z) > 100) {
     all_x_z, all_score_sd, c(0.90, 0.80)
   )
   cat("   ✓ Reliability calculation: R² =", round(metrics$model_rsquared, 4), "\n")
+
+  x_seq <- metrics$pred_x_seq
+  rel_vals <- metrics$pred_reliability
+  grid_widths <- sapply(c(0.90, 0.80), function(t) {
+    valid_x <- x_seq[rel_vals >= t]
+    if (length(valid_x) == 0) NA else diff(range(valid_x))
+  })
+  analytic_widths <- metrics$zone_widths[c("zone_90_width", "zone_80_width")]
+  if (all(!is.na(grid_widths)) && all(!is.na(analytic_widths))) {
+    if (all(abs(grid_widths - analytic_widths) < 0.05)) {
+      cat("   ✓ Analytic intervals match grid search\n")
+    } else {
+      cat("   ⚠️ Analytic intervals differ from grid search\n")
+    }
+  } else {
+    cat("   ⚠️ Unable to verify analytic intervals\n")
+  }
 } else {
   cat("   ⚠️ Insufficient data for reliability test\n")
 }
