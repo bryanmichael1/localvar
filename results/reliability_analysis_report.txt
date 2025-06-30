@@ -1,0 +1,23 @@
+# LOCALVAR Reliability Analysis Report
+Generated: 2025-06-30 10:43:04.324841
+
+## Summary
+- Window sizes analyzed: 3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100
+- Total data points: 11340000
+- Average model R²: 0.0173
+
+## Key Findings
+### Best performing window size (90% zone width):
+- Window size: 40
+- Zone width: 3.492
+- Baseline: 0.3701
+- R²: 0.0107
+
+### Zone Width Statistics (90% reliability):
+- Min.: 2.027
+- 1st Qu.: 2.078
+- Median: 2.092
+- Mean: 2.313
+- 3rd Qu.: 2.229
+- Max.: 3.492
+

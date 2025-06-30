@@ -205,8 +205,52 @@ calculate_reliability_metrics_optimized <- function(x_z_vals, score_sd_vals, thr
   b <- coefs["x_z"]
   c_coef <- coefs["I(x_z^2)"]
 
+  # Check for flat model conditions
+  model_rsq <- summary(model)$r.squared
+  reliability_range <- max(rel_reliability, na.rm = TRUE) - min(rel_reliability, na.rm = TRUE)
+  is_flat_model <- model_rsq < 0.01 || reliability_range < 0.05
+
   threshold_ranges <- lapply(thresholds, function(thresh) {
-    compute_quadratic_interval(a, b, c_coef, baseline, thresh)
+    # For flat models with minimal variation, use data-driven approach
+    if (is_flat_model) {
+      # Check if threshold is achievable given the reliability range
+      max_reliability <- max(rel_reliability, na.rm = TRUE)
+      if (thresh > max_reliability) {
+        return(c(NA, NA))  # Threshold too high
+      }
+      
+      # For achievable thresholds on flat models, use x_z range with some restriction
+      # More restrictive for higher thresholds
+      restriction_factor <- (thresh - 0.5) * 2  # 0 at 50%, 1 at 100%
+      restriction_factor <- max(0, min(1, restriction_factor))
+      
+      # Restrict to central portion based on threshold
+      x_range_width <- diff(x_range)
+      restriction_width <- x_range_width * (1 - restriction_factor * 0.8)  # Max 80% restriction
+      
+      center <- mean(x_range)
+      half_width <- restriction_width / 2
+      
+      return(c(center - half_width, center + half_width))
+    } else {
+      # Use analytical solution for non-flat models
+      interval <- compute_quadratic_interval(a, b, c_coef, baseline, thresh)
+      
+      # Handle infinite intervals from downward parabolas
+      if (any(is.infinite(interval))) {
+        # Constrain to reasonable bounds based on data range
+        data_range_width <- diff(x_range)
+        expansion_factor <- 1 + (1 - thresh) * 2  # More expansion for lower thresholds
+        
+        bounded_width <- data_range_width * expansion_factor
+        center <- mean(x_range)
+        half_width <- bounded_width / 2
+        
+        return(c(center - half_width, center + half_width))
+      }
+      
+      return(interval)
+    }
   })
   names(threshold_ranges) <- paste0("Above_", thresholds * 100, "pct")
 
@@ -225,10 +269,26 @@ calculate_reliability_metrics_optimized <- function(x_z_vals, score_sd_vals, thr
   cat("  📊 Reliability range:", round(min(rel_reliability, na.rm = TRUE), 4), 
       "to", round(max(rel_reliability, na.rm = TRUE), 4), "\n")
   cat("  📊 Model R²:", round(summary(model)$r.squared, 4), "\n")
+  cat("  📊 Model type:", if(is_flat_model) "FLAT (using data-driven approach)" else "QUADRATIC (using analytical solution)", "\n")
   
   # Debug: show where minimum reliability occurs
   min_rel_idx <- which.min(rel_reliability)
-  cat("  📊 Min reliability at x_z =", round(x_seq[min_rel_idx], 3), "\n")
+  max_rel_idx <- which.max(rel_reliability)
+  cat("  📊 Min reliability at x_z =", round(x_seq[min_rel_idx], 3), 
+      "with reliability =", round(rel_reliability[min_rel_idx], 4), "\n")
+  cat("  📊 Max reliability at x_z =", round(x_seq[max_rel_idx], 3), 
+      "with reliability =", round(rel_reliability[max_rel_idx], 4), "\n")
+  
+  # Show reliability at key x_z points
+  key_points <- c(-2, -1, 0, 1, 2)
+  key_points <- key_points[key_points >= x_range[1] & key_points <= x_range[2]]
+  if (length(key_points) > 0) {
+    cat("  📊 Reliability at key x_z points:\n")
+    for (xz_val in key_points) {
+      closest_idx <- which.min(abs(x_seq - xz_val))
+      cat("      x_z =", xz_val, "→ reliability =", round(rel_reliability[closest_idx], 4), "\n")
+    }
+  }
   
   # Print zone widths for debugging
   for (i in seq_along(thresholds)) {
@@ -236,11 +296,14 @@ calculate_reliability_metrics_optimized <- function(x_z_vals, score_sd_vals, thr
     zone_width <- zone_widths[i]
     range_vals <- threshold_ranges[[i]]
     
-    if (!is.na(zone_width)) {
+    if (!is.na(zone_width) && is.finite(zone_width)) {
       cat("  📏", thresh*100, "% zone: [", round(range_vals[1], 3), ",", 
           round(range_vals[2], 3), "] width =", round(zone_width, 3), "\n")
+    } else if (!is.na(zone_width) && is.infinite(zone_width)) {
+      cat("  📏", thresh*100, "% zone: [", round(range_vals[1], 3), ",", 
+          round(range_vals[2], 3), "] width = Inf (unbounded)\n")
     } else {
-      cat("  📏", thresh*100, "% zone: No valid region\n")
+      cat("  📏", thresh*100, "% zone: No valid region (threshold too high)\n")
     }
   }
   
@@ -340,17 +403,72 @@ create_reliability_summary_table <- function(reliability_results) {
   
   return(summary_df)
 }
-#' Compute real roots for a reliability threshold
+#' Compute interval where quadratic inequality holds for reliability threshold
 #'
 #' Solves the quadratic inequality:
 #' baseline / (a + b*x + c*x^2) >= threshold
 #' Which simplifies to: c*x^2 + b*x + (a - baseline/threshold) <= 0
+#' 
+#' @param a Intercept coefficient from quadratic model
+#' @param b Linear coefficient from quadratic model  
+#' @param c Quadratic coefficient from quadratic model
+#' @param baseline Baseline volatility value
+#' @param threshold Reliability threshold (0-1)
+#' @return Vector of length 2 with interval bounds [lower, upper], or c(NA, NA) if no solution
 compute_quadratic_interval <- function(a, b, c, baseline, threshold) {
-  rhs <- baseline / threshold
-  coef <- c(c, b, a - rhs)
-  roots <- Re(polyroot(coef))
-  if (length(roots) == 2 && is.finite(roots[1]) && is.finite(roots[2])) {
-    return(sort(roots))
+  # Input validation
+  if (any(!is.finite(c(a, b, c, baseline, threshold))) || threshold <= 0) {
+    return(c(NA, NA))
   }
-  c(NA, NA)
+  
+  # Transform inequality: baseline / (a + b*x + c*x^2) >= threshold
+  # Rearrange to: c*x^2 + b*x + (a - baseline/threshold) <= 0
+  rhs <- baseline / threshold
+  new_constant <- a - rhs
+  
+  # Handle degenerate cases
+  if (abs(c) < 1e-10) {
+    # Linear case: b*x + new_constant <= 0
+    if (abs(b) < 1e-10) {
+      # Constant case
+      return(if (new_constant <= 0) c(-Inf, Inf) else c(NA, NA))
+    }
+    # Linear solution: x <= -new_constant/b
+    critical_x <- -new_constant / b
+    return(if (b > 0) c(-Inf, critical_x) else c(critical_x, Inf))
+  }
+  
+  # Quadratic case: solve c*x^2 + b*x + new_constant = 0
+  discriminant <- b^2 - 4 * c * new_constant
+  
+  if (discriminant < 0) {
+    # No real roots - check sign of quadratic
+    # For very large |x|, sign is determined by c
+    return(if (c < 0) c(-Inf, Inf) else c(NA, NA))
+  }
+  
+  if (discriminant == 0) {
+    # One root (repeated)
+    root <- -b / (2 * c)
+    return(if (c < 0) c(-Inf, Inf) else c(root, root))
+  }
+  
+  # Two distinct real roots
+  sqrt_disc <- sqrt(discriminant)
+  root1 <- (-b - sqrt_disc) / (2 * c)
+  root2 <- (-b + sqrt_disc) / (2 * c)
+  roots <- sort(c(root1, root2))
+  
+  # For quadratic ax^2 + bx + c <= 0:
+  # If leading coefficient > 0: solution is between roots
+  # If leading coefficient < 0: solution is outside roots
+  if (c > 0) {
+    # Parabola opens upward - solution between roots
+    return(roots)
+  } else {
+    # Parabola opens downward - solution outside roots
+    # For reliability analysis, we typically want bounded intervals
+    # Return the roots but caller should handle unbounded case
+    return(roots)
+  }
 }

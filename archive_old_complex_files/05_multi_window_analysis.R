@@ -189,6 +189,37 @@ for (i in seq_along(WINDOW_SIZES)) {
       window_data$x_z, window_data$score_sd, RELIABILITY_THRESHOLDS
     )
     
+    # Special detailed output for window size 40
+    if (window_size == 40) {
+      cat("\n🔍 DETAILED RELIABILITY ANALYSIS FOR WINDOW SIZE 40:\n")
+      cat("   Data points used:", length(window_data$x_z), "\n")
+      cat("   x_z range in data:", round(min(window_data$x_z, na.rm = TRUE), 3), 
+          "to", round(max(window_data$x_z, na.rm = TRUE), 3), "\n")
+      cat("   score_sd range:", round(min(window_data$score_sd, na.rm = TRUE), 4), 
+          "to", round(max(window_data$score_sd, na.rm = TRUE), 4), "\n")
+      
+      # Show distribution of data points
+      cat("   x_z distribution (percentiles):\n")
+      x_z_quantiles <- quantile(window_data$x_z, probs = c(0.05, 0.25, 0.5, 0.75, 0.95), na.rm = TRUE)
+      for (i in seq_along(x_z_quantiles)) {
+        cat("     ", names(x_z_quantiles)[i], ":", round(x_z_quantiles[i], 3), "\n")
+      }
+      
+      # Show how reliability varies across the range
+      if (!is.null(metrics$pred_reliability) && !is.null(metrics$pred_x_seq)) {
+        cat("   Reliability curve key points:\n")
+        rel_seq <- metrics$pred_reliability
+        x_seq <- metrics$pred_x_seq
+        
+        # Sample points across the reliability curve
+        sample_indices <- seq(1, length(x_seq), length.out = 20)
+        for (idx in sample_indices) {
+          cat("     x_z =", round(x_seq[idx], 2), "→ reliability =", round(rel_seq[idx], 4), "\n")
+        }
+      }
+      cat("🔍 END DETAILED ANALYSIS\n\n")
+    }
+    
     # Store results
     all_results[[paste0("window_", window_size)]] <- c(
       list(window_size = window_size, n_datapoints = length(window_data$x_z)),
