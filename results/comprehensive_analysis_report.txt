@@ -1,0 +1,163 @@
+COMPREHENSIVE WINDOW SIZE ANALYSIS REPORT
+=========================================
+Generated: 2025-06-30 20:58:41.446436
+
+EXECUTIVE SUMMARY:
+=================
+• Analyzed 11 window sizes ranging from 3 to 100
+• Best model quality (R²): 0.0621 at window size 100
+• Highest baseline volatility: 1.2302 at window size 3
+
+OPTIMAL WINDOW SIZES BY RELIABILITY THRESHOLD:
+==============================================
+
+2% Reliability:
+  Optimal window size: 75
+  Zone width: 0.319
+  Model R²: 0.0437
+
+2% Reliability:
+  Optimal window size: 75
+  Zone width: 0.319
+  Model R²: 0.0437
+
+1% Reliability:
+  Optimal window size: 10
+  Zone width: 0.517
+  Model R²: 0.0001
+
+1% Reliability:
+  Optimal window size: 10
+  Zone width: 0.517
+  Model R²: 0.0001
+
+0% Reliability:
+  Optimal window size: 100
+  Zone width: 1.090
+  Model R²: 0.0621
+
+0% Reliability:
+  Optimal window size: 100
+  Zone width: 1.090
+  Model R²: 0.0621
+
+DETAILED RESULTS BY WINDOW SIZE:
+================================
+
+WINDOW SIZE: 3
+  Model Quality (R²): 0.0000
+  Baseline Volatility: 1.2302
+  Data Points: 1000000
+
+WINDOW SIZE: 5
+  Model Quality (R²): 0.0000
+  Baseline Volatility: 1.1690
+  Data Points: 1002000
+  0% zone width: 1.609 (24.3% coverage)
+  0% zone width: 1.609 (24.3% coverage)
+
+WINDOW SIZE: 10
+  Model Quality (R²): 0.0001
+  Baseline Volatility: 1.1234
+  Data Points: 1007000
+  1% zone width: 0.517 (7.8% coverage)
+  1% zone width: 0.517 (7.8% coverage)
+  0% zone width: 2.173 (32.8% coverage)
+  0% zone width: 2.173 (32.8% coverage)
+
+WINDOW SIZE: 15
+  Model Quality (R²): 0.0007
+  Baseline Volatility: 1.1044
+  Data Points: 1012000
+  1% zone width: 1.181 (17.8% coverage)
+  1% zone width: 1.181 (17.8% coverage)
+  0% zone width: 1.955 (29.5% coverage)
+  0% zone width: 1.955 (29.5% coverage)
+
+WINDOW SIZE: 20
+  Model Quality (R²): 0.0017
+  Baseline Volatility: 1.0937
+  Data Points: 1017000
+  1% zone width: 1.303 (19.7% coverage)
+  1% zone width: 1.303 (19.7% coverage)
+  0% zone width: 1.838 (27.8% coverage)
+  0% zone width: 1.838 (27.8% coverage)
+
+WINDOW SIZE: 25
+  Model Quality (R²): 0.0035
+  Baseline Volatility: 1.0859
+  Data Points: 1022000
+  1% zone width: 1.338 (20.2% coverage)
+  1% zone width: 1.338 (20.2% coverage)
+  0% zone width: 1.756 (26.5% coverage)
+  0% zone width: 1.756 (26.5% coverage)
+
+WINDOW SIZE: 30
+  Model Quality (R²): 0.0059
+  Baseline Volatility: 1.0800
+  Data Points: 1027000
+  1% zone width: 1.331 (20.1% coverage)
+  1% zone width: 1.331 (20.1% coverage)
+  0% zone width: 1.680 (25.4% coverage)
+  0% zone width: 1.680 (25.4% coverage)
+
+WINDOW SIZE: 40
+  Model Quality (R²): 0.0126
+  Baseline Volatility: 1.0730
+  Data Points: 1037000
+  2% zone width: 0.331 (5.0% coverage)
+  2% zone width: 0.331 (5.0% coverage)
+  1% zone width: 1.307 (19.7% coverage)
+  1% zone width: 1.307 (19.7% coverage)
+  0% zone width: 1.586 (24.0% coverage)
+  0% zone width: 1.586 (24.0% coverage)
+
+WINDOW SIZE: 50
+  Model Quality (R²): 0.0211
+  Baseline Volatility: 1.0696
+  Data Points: 1047000
+  2% zone width: 0.476 (7.2% coverage)
+  2% zone width: 0.476 (7.2% coverage)
+  1% zone width: 1.243 (18.8% coverage)
+  1% zone width: 1.243 (18.8% coverage)
+  0% zone width: 1.487 (22.4% coverage)
+  0% zone width: 1.487 (22.4% coverage)
+
+WINDOW SIZE: 75
+  Model Quality (R²): 0.0437
+  Baseline Volatility: 1.0657
+  Data Points: 1072000
+  2% zone width: 0.319 (4.8% coverage)
+  2% zone width: 0.319 (4.8% coverage)
+  1% zone width: 1.062 (16.0% coverage)
+  1% zone width: 1.062 (16.0% coverage)
+  0% zone width: 1.282 (19.4% coverage)
+  0% zone width: 1.282 (19.4% coverage)
+
+WINDOW SIZE: 100
+  Model Quality (R²): 0.0621
+  Baseline Volatility: 1.0639
+  Data Points: 1097000
+  1% zone width: 0.858 (12.9% coverage)
+  1% zone width: 0.858 (12.9% coverage)
+  0% zone width: 1.090 (16.4% coverage)
+  0% zone width: 1.090 (16.4% coverage)
+
+INTERPRETATION GUIDE:
+====================
+• Model R² shows how well the quadratic volatility model fits the data
+• Baseline volatility indicates the overall precision of estimates
+• Zone widths show the range where analysis is reliable at each threshold
+• Coverage shows what percentage of the data range is reliable
+• Smaller zone widths = more precise reliability estimates
+• Higher coverage = more of your data is reliably analyzable
+
+VISUALIZATION FILES:
+===================
+• comprehensive_model_performance.png - Model quality and volatility trends
+• comprehensive_reliability_heatmap.png - Coverage by window size and threshold
+• comprehensive_reliability_curves.png - All reliability curves overlaid
+• comprehensive_zone_widths.png - Zone width comparison across thresholds
+
+RECOMMENDATIONS:
+================

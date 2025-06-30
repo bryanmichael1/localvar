@@ -22,35 +22,41 @@ library(dplyr)
 library(future)      # Modern parallel processing
 library(furrr)       # purrr-style parallel functions
 library(purrr)       # Data manipulation functions
-devtools::load_all()
+
+# Load project package
+if (file.exists("DESCRIPTION")) {
+  # Development mode - load from source
+  devtools::load_all()
+} else {
+  # Production mode - use installed package
+  library(localvar)
+}
+
+# Load configuration
+source("config.R")
 
 cat("=== ANALYZING RELIABILITY ACROSS WINDOW SIZES ===\n")
 
 # ========================================
-# SETTINGS (You can change these)
+# SETTINGS (from config.R - modify config.R to change these)
 # ========================================
 
-# Input data file (from Step 1)
-INPUT_FILE <- "data/simulated_raw_data_tdist.rds"
-
-# Number of datasets to use (NULL to use all)
-MAX_DATASETS <- 100  # e.g., 500 to use first 500 datasets, or NULL for all
-
-# Window sizes to test (you can add/remove sizes)
-WINDOW_SIZES <- c(3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100)
-
-# Output files
-OUTPUT_DETAILED <- "data/multi_window_reliability_detailed.rds"
-OUTPUT_SUMMARY <- "results/multi_window_reliability_summary.csv"
-
-# Memory settings (for 16GB Mac)
-BATCH_SIZE <- 20
+# Use configuration values
+INPUT_FILE <- CONFIG$get_path("raw_data")
+MAX_DATASETS <- CONFIG$max_datasets_memory_limit
+WINDOW_SIZES <- CONFIG$window_sizes
+RELIABILITY_THRESHOLDS <- CONFIG$reliability_thresholds
+OUTPUT_DETAILED <- CONFIG$get_path("detailed_results")
+OUTPUT_SUMMARY <- CONFIG$get_path("summary_results")
+BATCH_SIZE <- CONFIG$batch_size
+PARALLEL_WORKERS <- min(CONFIG$max_parallel_workers, max(1, future::availableCores() - 1))
 
 cat("Settings:\n")
 cat("- Input file:", INPUT_FILE, "\n")
 cat("- Max datasets:", ifelse(is.null(MAX_DATASETS), "All", MAX_DATASETS), "\n")
 cat("- Window sizes:", paste(WINDOW_SIZES, collapse = ", "), "\n")
-cat("- Batch size:", BATCH_SIZE, "\n\n")
+cat("- Reliability thresholds:", paste(RELIABILITY_THRESHOLDS * 100, collapse = "%, "), "%\n")
+cat("- Parallel workers:", PARALLEL_WORKERS, "\n\n")
 
 # ========================================
 # LOAD DATA
@@ -75,6 +81,10 @@ if (!is.null(MAX_DATASETS) && is.numeric(MAX_DATASETS)) {
 }
 
 cat("Using", length(raw_datasets), "datasets for all window sizes\n")
+
+# Adjust batch size now that we know the dataset size
+BATCH_SIZE <- min(20, max(5, length(raw_datasets) %/% 10))  # Adaptive batch size
+cat("- Batch size:", BATCH_SIZE, "(adaptive)\n")
 
 # Validate data structure
 first_dataset <- raw_datasets[[1]]
@@ -104,72 +114,124 @@ process_window_size <- function(raw_datasets, window_size, batch_size) {
   
   cat("  Processing", n_datasets, "datasets with future/furrr parallel processing\n")
   
-  # Set up parallel processing plan
+  # Set up parallel processing plan with error handling
   n_cores <- max(1, min(future::availableCores() - 1, 4))  # Cap at 4 cores for stability
   cat("  Using", n_cores, "cores for parallel processing\n")
   
   # Configure future plan for parallel processing
-  if (n_cores > 1) {
-    future::plan(future::multisession, workers = n_cores)
-  } else {
-    future::plan(future::sequential)
-  }
-  
-  # Process datasets in parallel using furrr
-  results <- furrr::future_map(seq_len(n_datasets), function(i) {
-    # Source all R functions in each parallel worker
-    source(file.path("R", "core_pipeline.R"))
-    source(file.path("R", "helper_functions.R"))
-    source(file.path("R", "reliability_functions.R"))
+  tryCatch({
+    if (n_cores > 1) {
+      future::plan(future::multisession, workers = n_cores)
+    } else {
+      future::plan(future::sequential)
+    }
     
-    tryCatch({
-      # Get dataset
-      dataset <- raw_datasets[[i]]
-      
-      # Validate dataset structure
-      if (!all(c("x", "y_norm") %in% names(dataset))) {
-        return(list(x_z = numeric(0), score_sd = numeric(0), error = "Missing columns"))
+    # Process datasets in parallel using furrr
+    results <- furrr::future_map(seq_len(n_datasets), function(i) {
+      # Load project functions in each parallel worker
+      if (file.exists("DESCRIPTION")) {
+        # Development mode - source the files directly
+        source(file.path("R", "core_pipeline.R"))
+        source(file.path("R", "helper_functions.R"))
+        source(file.path("R", "reliability_functions.R"))
+      } else {
+        # Production mode - use installed package
+        library(localvar)
       }
       
-      # Run volatility analysis on this dataset
-      result <- run_volatility_pipeline(
-        x = dataset$x,
-        y = dataset$y_norm,
-        window_size = window_size,  # This variable is passed via globals
-        x_type = "continuous",
-        y_type = "continuous"
-      )
-      
-      # Debug: check result structure
-      if (is.null(result)) {
-        return(list(x_z = numeric(0), score_sd = numeric(0), error = "NULL result"))
-      }
-      
-      if (is.null(result$windows)) {
-        error_msg <- if (!is.null(result$meta$error)) result$meta$error else "No windows created"
-        return(list(x_z = numeric(0), score_sd = numeric(0), error = error_msg))
-      }
-      
-      # Extract results from all windows
-      x_z_vals <- numeric(0)
-      score_sd_vals <- numeric(0)
-      
-      for (w in result$windows) {
-        if (!is.null(w$x_stats) && !is.null(w$x_stats$mean_z) && 
-            !is.null(w$score) && !is.null(w$score$sd) &&
-            is.finite(w$x_stats$mean_z) && is.finite(w$score$sd)) {
-          x_z_vals <- c(x_z_vals, w$x_stats$mean_z)
-          score_sd_vals <- c(score_sd_vals, w$score$sd)
+      tryCatch({
+        # Get dataset
+        dataset <- raw_datasets[[i]]
+        
+        # Validate dataset structure
+        if (!all(c("x", "y_norm") %in% names(dataset))) {
+          return(list(x_z = numeric(0), score_sd = numeric(0), error = "Missing columns"))
         }
-      }
-      
-      return(list(x_z = x_z_vals, score_sd = score_sd_vals, n_windows = length(result$windows)))
-      
-    }, error = function(e) {
-      # Return error info for debugging
-      return(list(x_z = numeric(0), score_sd = numeric(0), error = e$message))
+        
+        # Run volatility analysis on this dataset
+        result <- run_volatility_pipeline(
+          x = dataset$x,
+          y = dataset$y_norm,
+          window_size = window_size,  # This variable is passed via globals
+          x_type = "continuous",
+          y_type = "continuous"
+        )
+        
+        # Debug: check result structure
+        if (is.null(result)) {
+          return(list(x_z = numeric(0), score_sd = numeric(0), error = "NULL result"))
+        }
+        
+        if (is.null(result$windows)) {
+          error_msg <- if (!is.null(result$meta$error)) result$meta$error else "No windows created"
+          return(list(x_z = numeric(0), score_sd = numeric(0), error = error_msg))
+        }
+        
+        # Extract results from all windows
+        x_z_vals <- numeric(0)
+        score_sd_vals <- numeric(0)
+        
+        for (w in result$windows) {
+          if (!is.null(w$x_stats) && !is.null(w$x_stats$mean_z) && 
+              !is.null(w$score) && !is.null(w$score$sd) &&
+              is.finite(w$x_stats$mean_z) && is.finite(w$score$sd)) {
+            x_z_vals <- c(x_z_vals, w$x_stats$mean_z)
+            score_sd_vals <- c(score_sd_vals, w$score$sd)
+          }
+        }
+        
+        return(list(x_z = x_z_vals, score_sd = score_sd_vals, n_windows = length(result$windows)))
+        
+      }, error = function(e) {
+        # Return error info for debugging
+        return(list(x_z = numeric(0), score_sd = numeric(0), error = e$message))
+      })
+    }, .options = furrr_options(seed = TRUE, globals = list(raw_datasets = raw_datasets, window_size = window_size)))
+    
+  }, error = function(e) {
+    cat("  ⚠️ Parallel processing failed, falling back to sequential processing\n")
+    cat("  Error:", e$message, "\n")
+    
+    # Fallback to sequential processing
+    future::plan(future::sequential)
+    results <- lapply(seq_len(n_datasets), function(i) {
+      tryCatch({
+        dataset <- raw_datasets[[i]]
+        if (!all(c("x", "y_norm") %in% names(dataset))) {
+          return(list(x_z = numeric(0), score_sd = numeric(0), error = "Missing columns"))
+        }
+        
+        result <- run_volatility_pipeline(
+          x = dataset$x,
+          y = dataset$y_norm,
+          window_size = window_size,
+          x_type = "continuous",
+          y_type = "continuous"
+        )
+        
+        if (is.null(result) || is.null(result$windows)) {
+          return(list(x_z = numeric(0), score_sd = numeric(0), error = "No windows"))
+        }
+        
+        x_z_vals <- numeric(0)
+        score_sd_vals <- numeric(0)
+        
+        for (w in result$windows) {
+          if (!is.null(w$x_stats) && !is.null(w$x_stats$mean_z) && 
+              !is.null(w$score) && !is.null(w$score$sd) &&
+              is.finite(w$x_stats$mean_z) && is.finite(w$score$sd)) {
+            x_z_vals <- c(x_z_vals, w$x_stats$mean_z)
+            score_sd_vals <- c(score_sd_vals, w$score$sd)
+          }
+        }
+        
+        return(list(x_z = x_z_vals, score_sd = score_sd_vals, n_windows = length(result$windows)))
+        
+      }, error = function(e) {
+        return(list(x_z = numeric(0), score_sd = numeric(0), error = e$message))
+      })
     })
-  }, .options = furrr_options(seed = TRUE, globals = list(raw_datasets = raw_datasets, window_size = window_size)))
+  })
   
   # Combine results from all datasets
   all_x_z <- unlist(purrr::map(results, "x_z"))
@@ -295,13 +357,15 @@ if (length(all_results) > 0) {
   cat("⚠️ No results to save\n")
 }
 
-cat("\n🎯 NEXT STEPS:\n")
-cat("• Run '03_view_results.R' to analyze ONE specific window size in detail\n")
-cat("• Run '04_compare_window_sizes.R' to analyze ALL window sizes and find optimal\n")
-cat("📊 Scripts 03 & 04 will calculate reliability zones from this raw data\n")
+cat("\n🎯 NEXT STEP: Run '03_view_results.R' to calculate zones and see detailed results\n")
+cat("📊 The zone analysis (95% reliability, etc.) will be done in step 3 for efficiency\n")
 
 # Clean up parallel processing and memory
-future::plan(future::sequential)  # Reset to sequential processing
+tryCatch({
+  future::plan(future::sequential)  # Reset to sequential processing
+}, warning = function(w) {
+  # Suppress connection warnings during cleanup
+})
 rm(list = ls())
 gc()
 

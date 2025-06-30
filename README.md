@@ -17,15 +17,20 @@
 # Step 1: Generate test data
 source("scripts/01_generate_data.R")
 
-# Step 2: Run analysis (all window sizes)  
+# Step 2: Collect raw data (all window sizes)
 source("scripts/02_analyze_reliability.R")
 
-# Step 3: View results and plots
+# Step 3: Focus on single window size analysis
 source("scripts/03_view_results.R")
 
-# Step 4: Compare window sizes to find optimal
+# Step 4: Compare all window sizes systematically
 source("scripts/04_compare_window_sizes.R")
 ```
+
+### What Each Script Does:
+- **Script 02**: Data collection only - tests multiple window sizes and saves raw results
+- **Script 03**: Single window deep-dive - detailed analysis of one specific window size  
+- **Script 04**: Multi-window comparison - systematic comparison of all window sizes
 
 ## 📁 Project Organization
 
@@ -54,20 +59,23 @@ source("scripts/04_compare_window_sizes.R")
 
 ## ⚙️ Key Settings You Can Adjust
 
-The main analysis script `scripts/02_analyze_reliability.R` contains key parameters:
-
+### Script 02 (Data Collection)
 ```r
 WINDOW_SIZES <- c(20, 30, 40, 50)     # Different window sizes to test
-MIN_STABILITY_ZONE <- 10              # Minimum reliable zone width
-CONFIDENCE_LEVELS <- c(0.8, 0.9, 0.95) # Reliability thresholds
+```
+
+### Scripts 03 & 04 (Analysis)
+```r
+TARGET_WINDOW_SIZE <- 40              # Which window to analyze (Script 03)
+RELIABILITY_THRESHOLDS <- c(0.95, 0.90, 0.85, 0.80)  # Zone confidence levels
 ```
 
 ## 📊 What You'll Get
 
-- **CSV summaries** of reliability statistics by window size
-- **Visual plots** showing reliability zones and model performance
-- **Text reports** with interpretable results and recommendations
-- **Comparison charts** to help choose optimal analysis parameters
+- **Raw data collection** from Script 02 (no analysis, just systematic data gathering)
+- **Single window analysis** from Script 03 (scatter plots, zone analysis, detailed reports)
+- **Multi-window comparison** from Script 04 (performance comparison across all window sizes)
+- **Optimal window recommendations** based on statistical criteria and visualizations
 
 ## 📖 Full Documentation
 

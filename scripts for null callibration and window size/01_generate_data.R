@@ -11,17 +11,28 @@ gc()
 library(simstudy)
 library(data.table) 
 library(dplyr)
-devtools::load_all()
+# Load project package
+if (file.exists("DESCRIPTION")) {
+  # Development mode - load from source
+  devtools::load_all()
+} else {
+  # Production mode - use installed package
+  library(localvar)
+}
+
+# Load configuration
+source("config.R")
 
 cat("=== GENERATING SIMULATION DATA ===\n")
 
 # ========================================
-# SETTINGS (You can change these)
+# SETTINGS (from config.R - modify config.R to change these)
 # ========================================
 
-N_DATASETS <- 1000        # Number of datasets to create
-N_POINTS <- 1000          # Data points per dataset  
-OUTPUT_FILE <- "data/simulated_raw_data_tdist.rds"
+# Use configuration values
+N_DATASETS <- CONFIG$n_datasets
+N_POINTS <- CONFIG$n_points_per_dataset
+OUTPUT_FILE <- CONFIG$get_path("raw_data")
 
 cat("Settings:\n")
 cat("- Number of datasets:", N_DATASETS, "\n")

@@ -28,15 +28,22 @@ validate_data_format <- function(datasets) {
     stop("Columns 'x' and 'y_norm' must be numeric")
   }
   
-  # Check all datasets have same structure
-  for (i in seq_along(datasets)) {
-    dataset <- datasets[[i]]
-    if (!all(required_columns %in% names(dataset))) {
-      stop("Dataset ", i, " is missing required columns")
-    }
-    if (nrow(dataset) == 0) {
-      warning("Dataset ", i, " is empty")
-    }
+  # Vectorized validation for all datasets
+  dataset_valid <- vapply(datasets, function(dataset) {
+    all(required_columns %in% names(dataset)) && nrow(dataset) > 0
+  }, logical(1))
+  
+  if (!all(dataset_valid)) {
+    invalid_indices <- which(!dataset_valid)
+    missing_structure <- sapply(invalid_indices, function(i) {
+      dataset <- datasets[[i]]
+      if (!all(required_columns %in% names(dataset))) {
+        paste0("Dataset ", i, ": missing columns")
+      } else {
+        paste0("Dataset ", i, ": empty")
+      }
+    })
+    stop("Validation failed:\n", paste(missing_structure, collapse = "\n"))
   }
   
   cat("✓ Data format validation passed\n")
@@ -169,3 +176,111 @@ create_example_data <- function(n_datasets = 10, n_points = 1000) {
   cat("✓ Example data created\n")
   return(datasets)
 }
+
+# ========================================
+# DATA PROCESSING UTILITIES
+# ========================================
+# High-performance utility functions for data processing
+
+#' Efficiently extract window data from analysis results
+#' 
+#' @param result Analysis result from run_volatility_pipeline
+#' @return List with extracted x_z and score_sd values
+extract_window_data_optimized <- function(result) {
+  if (is.null(result) || is.null(result$windows)) {
+    return(list(x_z = numeric(0), score_sd = numeric(0)))
+  }
+  
+  n_windows <- length(result$windows)
+  x_z_vals <- numeric(n_windows)
+  score_sd_vals <- numeric(n_windows)
+  valid_count <- 0
+  
+  for (i in seq_len(n_windows)) {
+    window <- result$windows[[i]]
+    if (!is.null(window$x_stats) && !is.null(window$score)) {
+      x_z <- window$x_stats$mean_z
+      volatility <- window$score$sd
+      
+      if (is.finite(x_z) && is.finite(volatility)) {
+        valid_count <- valid_count + 1
+        x_z_vals[valid_count] <- x_z
+        score_sd_vals[valid_count] <- volatility
+      }
+    }
+  }
+  
+  return(list(
+    x_z = x_z_vals[1:valid_count],
+    score_sd = score_sd_vals[1:valid_count]
+  ))
+}
+
+#' Robust data combination with pre-allocation
+#' 
+#' @param data_list List of data vectors to combine
+#' @param initial_size Initial pre-allocation size
+#' @return Combined vector
+combine_data_efficient <- function(data_list, initial_size = 1000) {
+  if (length(data_list) == 0) return(numeric(0))
+  
+  # Estimate total size
+  total_size <- sum(vapply(data_list, length, integer(1)))
+  if (total_size == 0) return(numeric(0))
+  
+  # Use more efficient combination for small lists
+  if (length(data_list) <= 10) {
+    return(unlist(data_list, use.names = FALSE))
+  }
+  
+  # Pre-allocate for large combinations
+  result <- numeric(total_size)
+  current_pos <- 1
+  
+  for (data_vec in data_list) {
+    if (length(data_vec) > 0) {
+      end_pos <- current_pos + length(data_vec) - 1
+      result[current_pos:end_pos] <- data_vec
+      current_pos <- end_pos + 1
+    }
+  }
+  
+  return(result)
+}
+
+#' Optimized summary statistics calculation
+#' 
+#' @param datasets List of datasets
+#' @return Summary statistics data frame
+summarize_datasets_optimized <- function(datasets) {
+  if (length(datasets) == 0) return(NULL)
+  
+  # Vectorized statistics calculation
+  n_datasets <- length(datasets)
+  
+  # Extract all x and y values efficiently
+  all_x <- lapply(datasets, `[[`, "x")
+  all_y <- lapply(datasets, `[[`, "y_norm")
+  
+  # Calculate statistics using vectorized operations
+  x_means <- vapply(all_x, mean, numeric(1), na.rm = TRUE)
+  y_means <- vapply(all_y, mean, numeric(1), na.rm = TRUE)
+  x_sds <- vapply(all_x, sd, numeric(1), na.rm = TRUE)
+  y_sds <- vapply(all_y, sd, numeric(1), na.rm = TRUE)
+  
+  # Build summary efficiently
+  data.frame(
+    n_datasets = n_datasets,
+    n_rows_per_dataset = length(all_x[[1]]),
+    x_mean_avg = mean(x_means, na.rm = TRUE),
+    x_mean_sd = sd(x_means, na.rm = TRUE),
+    x_sd_avg = mean(x_sds, na.rm = TRUE),
+    y_mean_avg = mean(y_means, na.rm = TRUE),
+    y_mean_sd = sd(y_means, na.rm = TRUE),
+    y_sd_avg = mean(y_sds, na.rm = TRUE)
+  )
+}
+
+# ========================================
+# EXISTING FUNCTIONS (updated for compatibility)
+# ========================================

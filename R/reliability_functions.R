@@ -2,10 +2,13 @@
 # RELIABILITY ANALYSIS FUNCTIONS
 # ========================================
 # Functions for calculating and analyzing reliability zones
+# Dependencies: future, furrr, ggplot2 (imported via DESCRIPTION)
 
-library(future)      # Modern parallel processing  
-library(furrr)       # purrr-style parallel functions
-library(ggplot2)     # For plotting functions
+#' @importFrom ggplot2 ggplot aes geom_point geom_smooth geom_line geom_hline labs theme_minimal theme element_text .data
+#' @importFrom future plan multisession sequential availableCores
+#' @importFrom furrr future_map furrr_options
+#' @importFrom stats predict lm loess quantile median sd
+NULL
 
 #' Analyze reliability across multiple datasets
 #' 
@@ -21,9 +24,13 @@ analyze_reliability <- function(datasets, window_size, reliability_thresholds = 
   cat("Analyzing reliability with window size", window_size, "\n")
   cat("Processing", length(datasets), "datasets in batches of", batch_size, "\n")
   
-  # Extract volatility data from all datasets
-  all_x_z <- c()
-  all_volatility <- c()
+  # Pre-allocate vectors for better memory efficiency
+  estimated_windows_per_dataset <- max(10, length(datasets[[1]]$x) %/% window_size)
+  estimated_total_windows <- length(datasets) * estimated_windows_per_dataset
+  
+  all_x_z <- numeric(estimated_total_windows)
+  all_volatility <- numeric(estimated_total_windows)
+  current_idx <- 1
   
   n_batches <- ceiling(length(datasets) / batch_size)
   
@@ -32,6 +39,10 @@ analyze_reliability <- function(datasets, window_size, reliability_thresholds = 
     end_idx <- min(batch * batch_size, length(datasets))
     
     cat("Processing batch", batch, "of", n_batches, "\n")
+    
+    # Collect batch results first
+    batch_x_z <- list()
+    batch_volatility <- list()
     
     for (i in start_idx:end_idx) {
       tryCatch({
@@ -44,16 +55,27 @@ analyze_reliability <- function(datasets, window_size, reliability_thresholds = 
         
         # Extract volatility data from all windows
         if (!is.null(result$windows)) {
-          for (window in result$windows) {
+          dataset_x_z <- numeric(length(result$windows))
+          dataset_volatility <- numeric(length(result$windows))
+          valid_count <- 0
+          
+          for (j in seq_along(result$windows)) {
+            window <- result$windows[[j]]
             if (!is.null(window$x_stats) && !is.null(window$score)) {
               x_z <- window$x_stats$mean_z
               volatility <- window$score$sd
               
               if (is.finite(x_z) && is.finite(volatility)) {
-                all_x_z <- c(all_x_z, x_z)
-                all_volatility <- c(all_volatility, volatility)
+                valid_count <- valid_count + 1
+                dataset_x_z[valid_count] <- x_z
+                dataset_volatility[valid_count] <- volatility
               }
             }
+          }
+          
+          if (valid_count > 0) {
+            batch_x_z[[length(batch_x_z) + 1]] <- dataset_x_z[1:valid_count]
+            batch_volatility[[length(batch_volatility) + 1]] <- dataset_volatility[1:valid_count]
           }
         }
         
@@ -62,9 +84,32 @@ analyze_reliability <- function(datasets, window_size, reliability_thresholds = 
       })
     }
     
+    # Efficiently combine batch results
+    if (length(batch_x_z) > 0) {
+      batch_x_combined <- unlist(batch_x_z, use.names = FALSE)
+      batch_vol_combined <- unlist(batch_volatility, use.names = FALSE)
+      
+      batch_size <- length(batch_x_combined)
+      if (current_idx + batch_size - 1 > length(all_x_z)) {
+        # Expand vectors if needed
+        new_size <- max(length(all_x_z) * 2, current_idx + batch_size)
+        all_x_z <- c(all_x_z, numeric(new_size - length(all_x_z)))
+        all_volatility <- c(all_volatility, numeric(new_size - length(all_volatility)))
+      }
+      
+      all_x_z[current_idx:(current_idx + batch_size - 1)] <- batch_x_combined
+      all_volatility[current_idx:(current_idx + batch_size - 1)] <- batch_vol_combined
+      current_idx <- current_idx + batch_size
+    }
+    
     # Clean up memory
+    rm(batch_x_z, batch_volatility)
     gc(verbose = FALSE)
   }
+  
+  # Trim to actual size
+  all_x_z <- all_x_z[1:(current_idx - 1)]
+  all_volatility <- all_volatility[1:(current_idx - 1)]
   
   cat("Extracted", length(all_x_z), "data points\n")
   
@@ -85,31 +130,97 @@ analyze_reliability <- function(datasets, window_size, reliability_thresholds = 
   return(reliability_results)
 }
 
-#' Calculate reliability zones from volatility data
-calculate_reliability_zones <- function(x_z_values, volatility_values, thresholds) {
+#' Fit reliability model with multiple methods
+#' 
+#' @param x Predictor values (standardized x positions)
+#' @param v Volatility values (response variable)
+#' @param method Fitting method: "quadratic" or "loess"
+#' @param ... Additional parameters passed to fitting functions
+#' @return List with model object, predictions, and method info
+fit_reliability_model <- function(x, v, method = c("quadratic", "loess"), ...) {
+  method <- match.arg(method)
+  
+  # Clean and prepare data
+  model_data <- data.frame(x_z = x, volatility = v)
+  q99 <- quantile(abs(model_data$x_z), 0.99, na.rm = TRUE)
+  model_data <- model_data[abs(model_data$x_z) <= q99, ]
+  
+  # Create prediction grid
+  x_grid <- seq(min(model_data$x_z), max(model_data$x_z), length.out = 1000)
+  
+  if (method == "quadratic") {
+    # Quadratic regression model
+    model <- lm(volatility ~ x_z + I(x_z^2), data = model_data)
+    pred_vol <- predict(model, newdata = data.frame(x_z = x_grid))
+    model_rsq <- summary(model)$r.squared
+    
+  } else if (method == "loess") {
+    # LOESS smoothing
+    span <- list(...)$span %||% 0.3  # Default span
+    model <- loess(volatility ~ x_z, data = model_data, span = span)
+    pred_vol <- predict(model, newdata = x_grid)
+    
+    # Calculate pseudo R-squared for loess
+    y_mean <- mean(model_data$volatility)
+    fitted_vals <- fitted(model)
+    tss <- sum((model_data$volatility - y_mean)^2)
+    rss <- sum((model_data$volatility - fitted_vals)^2)
+    model_rsq <- 1 - (rss / tss)
+  }
+  
+  # Ensure non-negative predictions
+  pred_vol <- pmax(pred_vol, 0.001)
+  
+  return(list(
+    model = model,
+    method = method,
+    model_data = model_data,
+    x_grid = x_grid,
+    pred_vol = pred_vol,
+    model_rsq = model_rsq
+  ))
+}
+
+#' Calculate reliability zones from volatility data (updated)
+calculate_reliability_zones <- function(x_z_values, volatility_values, thresholds, method = "quadratic") {
   # Clean data
   valid_idx <- is.finite(x_z_values) & is.finite(volatility_values)
   x_z <- x_z_values[valid_idx]
   volatility <- abs(volatility_values[valid_idx])
-  cat("Fitting reliability model with", length(x_z), "data points\n")
+  cat("Fitting reliability model with", length(x_z), "data points using", method, "method\n")
 
-  # Fit quadratic model
-  model_data <- data.frame(x_z = x_z, volatility = volatility)
-  q99 <- quantile(abs(model_data$x_z), 0.99, na.rm = TRUE)
-  model_data <- model_data[abs(model_data$x_z) <= q99, ]
-  volatility_model <- lm(volatility ~ x_z + I(x_z^2), data = model_data)
+  # Fit model using the new abstracted function
+  model_result <- fit_reliability_model(x_z, volatility, method = method)
+  
+  # Dynamic baseline volatility - find minimum of fitted curve
+  best_center <- model_result$x_grid[which.min(model_result$pred_vol)]
+  
+  # Baseline from observed data near the optimal center
+  baseline_region <- model_result$model_data[abs(model_result$model_data$x_z - best_center) < 0.25, ]
+  if (nrow(baseline_region) > 0) {
+    baseline <- mean(baseline_region$volatility)
+    cat("Dynamic baseline: center =", round(best_center, 3), ", baseline =", round(baseline, 4), 
+        "(", nrow(baseline_region), "points)\n")
+  } else {
+    # Fallback to overall mean if no points in region
+    baseline <- mean(model_result$model_data$volatility)
+    cat("Dynamic baseline fallback: using overall mean =", round(baseline, 4), "\n")
+  }
 
-  # Baseline volatility
-  central <- model_data[abs(model_data$x_z) < 0.5, ]
-  baseline <- if (nrow(central) > 0) mean(central$volatility) else mean(model_data$volatility)
-
-  # Prediction grid
-  x_grid <- seq(min(model_data$x_z), max(model_data$x_z), length.out = 1000)
-  pred_vol <- predict(volatility_model, newdata = data.frame(x_z = x_grid))
-  pred_vol <- pmax(pred_vol, 0.001)
-
-  # Reliability curve
-  reliability <- baseline / pred_vol
+  # Reliability curve - proper mathematical definition
+  # Reliability = variance reduction from baseline
+  # reliability = 1 - (predicted_volatility / baseline)
+  # This naturally gives values in [0,1] when predictions are reasonable
+  reliability <- 1 - (model_result$pred_vol / baseline)
+  
+  # Bound reliability to [0, 1] range
+  # Values < 0 mean model is worse than baseline (no reliability)
+  # Values > 1 would be impossible with this formula but we bound for safety
+  reliability <- pmax(reliability, 0)
+  reliability <- pmin(reliability, 1)
+  
+  # Handle any remaining non-finite values (should be rare with new formula)
+  reliability[!is.finite(reliability)] <- 0
 
   # Determine zones numerically
   zones <- lapply(thresholds, function(thresh) {
@@ -117,25 +228,26 @@ calculate_reliability_zones <- function(x_z_values, volatility_values, threshold
     if (length(idx) == 0) {
       list(lower = NA, upper = NA, width = NA)
     } else {
-      lower <- x_grid[min(idx)]
-      upper <- x_grid[max(idx)]
+      lower <- model_result$x_grid[min(idx)]
+      upper <- model_result$x_grid[max(idx)]
       list(lower = lower, upper = upper, width = upper - lower)
     }
   })
   names(zones) <- paste0("zone_", round(thresholds * 100), "pct")
 
-  # Model diagnostics
-  model_rsq <- summary(volatility_model)$r.squared
+  # Model diagnostics with corrected reliability interpretation
   rel_range <- range(reliability, na.rm = TRUE)
-  cat("Model R²:", round(model_rsq, 4), "\n")
+  cat("Model R²:", round(model_result$model_rsq, 4), "\n")
   cat("Reliability range:", round(rel_range[1], 4), "to", round(rel_range[2], 4), "\n")
+  cat("Reliability interpretation: 0 = no improvement over baseline, 1 = perfect prediction\n")
 
   return(list(
     zones = zones,
-    model = volatility_model,
-    model_rsq = model_rsq,
+    model = model_result$model,
+    method = method,
+    model_rsq = model_result$model_rsq,
     baseline_volatility = baseline,
-    reliability_curve = data.frame(x_z = x_grid, reliability = reliability)
+    reliability_curve = data.frame(x_z = model_result$x_grid, reliability = reliability)
   ))
 }
 
@@ -247,6 +359,11 @@ calculate_reliability_metrics_optimized <- function(x_z_vals, score_sd_vals, thr
   # Lower predicted volatility = higher reliability
   rel_reliability <- baseline / pred_abs_score
   
+  # Cap reliability at 1.0 (100%) - reliability above 1.0 doesn't make physical sense
+  # Also ensure reliability is non-negative and finite
+  rel_reliability <- pmin(rel_reliability, 1.0)
+  rel_reliability[!is.finite(rel_reliability)] <- 1.0  # Set infinite/NaN values to perfect reliability
+  
   a <- coefs["(Intercept)"]
   b <- coefs["x_z"]
   c_coef <- coefs["I(x_z^2)"]
@@ -300,14 +417,10 @@ calculate_reliability_metrics_optimized <- function(x_z_vals, score_sd_vals, thr
   })
   names(threshold_ranges) <- paste0("Above_", thresholds * 100, "pct")
 
-  # Calculate zone widths directly for better accuracy
-  zone_widths <- sapply(threshold_ranges, function(range_vals) {
-    if (any(is.na(range_vals))) {
-      NA
-    } else {
-      diff(range_vals)
-    }
-  })
+  # Calculate zone widths using vectorized operations
+  zone_widths <- vapply(threshold_ranges, function(range_vals) {
+    if (any(is.na(range_vals))) NA_real_ else diff(range_vals)
+  }, numeric(1))
   names(zone_widths) <- paste0("zone_", gsub("Above_|pct", "", names(threshold_ranges)), "_width")
   
   # Additional diagnostics
@@ -461,9 +574,15 @@ generate_single_window_analysis <- function(window_size, detailed_results = NULL
   }
   
   # Find the specific window size
-  window_key <- as.character(window_size)
+  window_key <- paste0("window_", window_size)
   if (!window_key %in% names(detailed_results)) {
-    stop("❌ Window size ", window_size, " not found in results!")
+    # Fallback to numeric string key
+    window_key <- as.character(window_size)
+    if (!window_key %in% names(detailed_results)) {
+      available_keys <- names(detailed_results)
+      stop("❌ Window size ", window_size, " not found in results!\n",
+           "Available keys: ", paste(available_keys, collapse = ", "))
+    }
   }
   
   window_data <- detailed_results[[window_key]]
@@ -558,9 +677,9 @@ generate_single_window_analysis <- function(window_size, detailed_results = NULL
         if (is.na(zone_color)) zone_color <- "gray"
         
         plots$zones <- plots$zones +
-          ggplot2::geom_rect(
-            ggplot2::aes(xmin = zone$lower, xmax = zone$upper, ymin = -y_pos, ymax = y_pos),
-            fill = zone_color, alpha = 0.3, inherit.aes = FALSE
+          ggplot2::annotate("rect",
+            xmin = zone$lower, xmax = zone$upper, ymin = -y_pos, ymax = y_pos,
+            fill = zone_color, alpha = 0.3
           ) +
           ggplot2::annotate("text", x = (zone$lower + zone$upper) / 2, y = 0, 
                   label = zone_pct, size = 3, fontface = "bold")
