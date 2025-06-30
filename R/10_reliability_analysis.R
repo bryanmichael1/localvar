@@ -201,69 +201,15 @@ calculate_reliability_metrics_optimized <- function(x_z_vals, score_sd_vals, thr
   # Lower predicted volatility = higher reliability
   rel_reliability <- baseline / pred_abs_score
   
-  # Improved threshold detection: handle flat models better
+  a <- coefs["(Intercept)"]
+  b <- coefs["x_z"]
+  c_coef <- coefs["I(x_z^2)"]
+
   threshold_ranges <- lapply(thresholds, function(thresh) {
-    # Find indices where reliability exceeds threshold
-    valid_indices <- which(rel_reliability >= thresh)
-    
-    if (length(valid_indices) == 0) {
-      return(c(NA, NA))
-    }
-    
-    # Check if model has very low discriminative power (R² < 0.01)
-    model_rsq <- summary(model)$r.squared
-    reliability_range <- max(rel_reliability, na.rm = TRUE) - min(rel_reliability, na.rm = TRUE)
-    
-    # For very flat models with large datasets, use percentile-based approach
-    if (model_rsq < 0.01 || reliability_range < 0.05) {
-      # Use more aggressive percentile-based thresholds for large flat datasets
-      # Map reliability thresholds to volatility percentiles more aggressively
-      volatility_percentile <- thresh * 0.7 + 0.25  # More sensitive mapping
-      
-      if (volatility_percentile > 0.99) volatility_percentile <- 0.99
-      
-      volatility_threshold <- quantile(pred_abs_score, volatility_percentile, na.rm = TRUE)
-      valid_indices <- which(pred_abs_score <= volatility_threshold)
-      
-      if (length(valid_indices) == 0) {
-        return(c(NA, NA))
-      }
-      
-      # For very high thresholds on flat models, be even more restrictive
-      if (thresh >= 0.9 && length(valid_indices) > 0.5 * length(x_seq)) {
-        # Use top 10% of most reliable regions for 90%+ thresholds
-        top_percentile <- 0.9 + (thresh - 0.9) * 0.8  # Scale from 0.9 to 0.98
-        volatility_threshold <- quantile(pred_abs_score, top_percentile, na.rm = TRUE)
-        valid_indices <- which(pred_abs_score <= volatility_threshold)
-      }
-    }
-    
-    # For symmetric quadratic models, expect U-shaped reliability
-    valid_x <- x_seq[valid_indices]
-    
-    if (length(valid_x) <= 1) {
-      return(if (length(valid_x) == 1) c(valid_x, valid_x) else c(NA, NA))
-    }
-    
-    # Check if we have a contiguous region or multiple regions
-    valid_x_sorted <- sort(valid_x)
-    gaps <- diff(valid_x_sorted)
-    large_gap_threshold <- 0.5  # Threshold for detecting separate regions
-    
-    if (any(gaps > large_gap_threshold)) {
-      # Multiple regions detected - find the central gap and use symmetric bounds
-      gap_locations <- which(gaps > large_gap_threshold)
-      if (length(gap_locations) > 0) {
-        # Take the outermost bounds of separate regions
-        return(c(min(valid_x_sorted), max(valid_x_sorted)))
-      }
-    }
-    
-    # Single contiguous region or multiple small regions
-    range(valid_x)
+    compute_quadratic_interval(a, b, c_coef, baseline, thresh)
   })
   names(threshold_ranges) <- paste0("Above_", thresholds * 100, "pct")
-  
+
   # Calculate zone widths directly for better accuracy
   zone_widths <- sapply(threshold_ranges, function(range_vals) {
     if (any(is.na(range_vals))) {
@@ -393,4 +339,18 @@ create_reliability_summary_table <- function(reliability_results) {
   }
   
   return(summary_df)
+}
+#' Compute real roots for a reliability threshold
+#'
+#' Solves the quadratic inequality:
+#' baseline / (a + b*x + c*x^2) >= threshold
+#' Which simplifies to: c*x^2 + b*x + (a - baseline/threshold) <= 0
+compute_quadratic_interval <- function(a, b, c, baseline, threshold) {
+  rhs <- baseline / threshold
+  coef <- c(c, b, a - rhs)
+  roots <- Re(polyroot(coef))
+  if (length(roots) == 2 && is.finite(roots[1]) && is.finite(roots[2])) {
+    return(sort(roots))
+  }
+  c(NA, NA)
 }
