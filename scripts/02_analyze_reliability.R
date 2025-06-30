@@ -8,9 +8,20 @@
 rm(list = ls())
 gc()
 
+# Install required packages if needed
+required_packages <- c("simstudy", "data.table", "dplyr", "future", "furrr", "purrr")
+missing_packages <- required_packages[!required_packages %in% installed.packages()[,"Package"]]
+if(length(missing_packages) > 0) {
+  cat("Installing missing packages:", paste(missing_packages, collapse = ", "), "\n")
+  install.packages(missing_packages)
+}
+
 library(simstudy)
 library(data.table)
 library(dplyr)
+library(future)      # Modern parallel processing
+library(furrr)       # purrr-style parallel functions
+library(purrr)       # Data manipulation functions
 devtools::load_all()
 
 cat("=== ANALYZING RELIABILITY ACROSS WINDOW SIZES ===\n")
@@ -21,6 +32,9 @@ cat("=== ANALYZING RELIABILITY ACROSS WINDOW SIZES ===\n")
 
 # Input data file (from Step 1)
 INPUT_FILE <- "data/simulated_raw_data_tdist.rds"
+
+# Number of datasets to use (NULL to use all)
+MAX_DATASETS <- 100  # e.g., 500 to use first 500 datasets, or NULL for all
 
 # Window sizes to test (you can add/remove sizes)
 WINDOW_SIZES <- c(3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100)
@@ -37,6 +51,7 @@ BATCH_SIZE <- 20
 
 cat("Settings:\n")
 cat("- Input file:", INPUT_FILE, "\n")
+cat("- Max datasets:", ifelse(is.null(MAX_DATASETS), "All", MAX_DATASETS), "\n")
 cat("- Window sizes:", paste(WINDOW_SIZES, collapse = ", "), "\n")
 cat("- Reliability thresholds:", paste(RELIABILITY_THRESHOLDS * 100, collapse = "%, "), "%\n")
 cat("- Batch size:", BATCH_SIZE, "\n\n")
@@ -51,8 +66,19 @@ if (!file.exists(INPUT_FILE)) {
 }
 
 cat("Loading data...\n")
-raw_datasets <- readRDS(INPUT_FILE)
-cat("✓ Loaded", length(raw_datasets), "datasets\n")
+raw_datasets_full <- readRDS(INPUT_FILE)
+cat("✓ Loaded", length(raw_datasets_full), "datasets from file\n")
+
+# Subset datasets if MAX_DATASETS is specified
+if (!is.null(MAX_DATASETS) && is.numeric(MAX_DATASETS)) {
+  n_use <- min(MAX_DATASETS, length(raw_datasets_full))
+  cat("Limiting to first", n_use, "datasets for analysis (of", length(raw_datasets_full), ")\n")
+  raw_datasets <- raw_datasets_full[seq_len(n_use)]
+} else {
+  raw_datasets <- raw_datasets_full
+}
+
+cat("Using", length(raw_datasets), "datasets for all window sizes\n")
 
 # Validate data structure
 first_dataset <- raw_datasets[[1]]
@@ -76,67 +102,82 @@ track_progress <- function(current, total, window_size, start_time) {
               current, total, pct, window_size, elapsed, eta))
 }
 
-# Process one window size
+# Process one window size with future/furrr parallel processing
 process_window_size <- function(raw_datasets, window_size, batch_size) {
   n_datasets <- length(raw_datasets)
-  n_batches <- ceiling(n_datasets / batch_size)
   
-  all_x_z <- numeric(0)
-  all_score_sd <- numeric(0)
+  cat("  Processing", n_datasets, "datasets with future/furrr parallel processing\n")
   
-  cat("  Processing", n_datasets, "datasets in", n_batches, "batches\n")
+  # Set up parallel processing plan
+  n_cores <- max(1, min(future::availableCores() - 1, 4))  # Cap at 4 cores for stability
+  cat("  Using", n_cores, "cores for parallel processing\n")
   
-  for (batch in seq_len(n_batches)) {
-    start_idx <- (batch - 1) * batch_size + 1
-    end_idx <- min(batch * batch_size, n_datasets)
-    
-    if (batch %% 5 == 0 || batch == n_batches) {
-      cat("    Batch", batch, "/", n_batches, "\n")
-    }
-    
-    # Process batch
-    batch_x_z <- numeric(0)
-    batch_score_sd <- numeric(0)
-    
-    for (i in start_idx:end_idx) {
-      tryCatch({
-        # Run volatility analysis on this dataset
-        result <- run_volatility_pipeline(
-          x = raw_datasets[[i]]$x,
-          y = raw_datasets[[i]]$y_norm,
-          window_size = window_size,
-          x_type = "continuous",
-          y_type = "continuous"
-        )
-        
-        # Extract results from all windows
-        if (!is.null(result$windows)) {
-          for (w in result$windows) {
-            if (!is.null(w$x_stats) && !is.null(w$x_stats$mean_z) && 
-                !is.null(w$score) && !is.null(w$score$sd) &&
-                is.finite(w$x_stats$mean_z) && is.finite(w$score$sd)) {
-              batch_x_z <- c(batch_x_z, w$x_stats$mean_z)
-              batch_score_sd <- c(batch_score_sd, w$score$sd)
-            }
-          }
-        }
-        
-      }, error = function(e) {
-        # Only print occasional errors to avoid spam
-        if (i %% 50 == 0) {
-          cat("      Warning: Dataset", i, "failed\n")
-        }
-      })
-    }
-    
-    # Add batch results
-    all_x_z <- c(all_x_z, batch_x_z)
-    all_score_sd <- c(all_score_sd, batch_score_sd)
-    
-    # Clean up memory
-    rm(batch_x_z, batch_score_sd)
-    gc(verbose = FALSE)
+  # Configure future plan for parallel processing
+  if (n_cores > 1) {
+    future::plan(future::multisession, workers = n_cores)
+  } else {
+    future::plan(future::sequential)
   }
+  
+  # Process datasets in parallel using furrr
+  results <- furrr::future_map(seq_len(n_datasets), function(i) {
+    # Source all R functions in each parallel worker
+    source(file.path("R", "core_pipeline.R"))
+    source(file.path("R", "helper_functions.R"))
+    source(file.path("R", "reliability_functions.R"))
+    
+    tryCatch({
+      # Get dataset
+      dataset <- raw_datasets[[i]]
+      
+      # Validate dataset structure
+      if (!all(c("x", "y_norm") %in% names(dataset))) {
+        return(list(x_z = numeric(0), score_sd = numeric(0), error = "Missing columns"))
+      }
+      
+      # Run volatility analysis on this dataset
+      result <- run_volatility_pipeline(
+        x = dataset$x,
+        y = dataset$y_norm,
+        window_size = window_size,  # This variable is passed via globals
+        x_type = "continuous",
+        y_type = "continuous"
+      )
+      
+      # Debug: check result structure
+      if (is.null(result)) {
+        return(list(x_z = numeric(0), score_sd = numeric(0), error = "NULL result"))
+      }
+      
+      if (is.null(result$windows)) {
+        error_msg <- if (!is.null(result$meta$error)) result$meta$error else "No windows created"
+        return(list(x_z = numeric(0), score_sd = numeric(0), error = error_msg))
+      }
+      
+      # Extract results from all windows
+      x_z_vals <- numeric(0)
+      score_sd_vals <- numeric(0)
+      
+      for (w in result$windows) {
+        if (!is.null(w$x_stats) && !is.null(w$x_stats$mean_z) && 
+            !is.null(w$score) && !is.null(w$score$sd) &&
+            is.finite(w$x_stats$mean_z) && is.finite(w$score$sd)) {
+          x_z_vals <- c(x_z_vals, w$x_stats$mean_z)
+          score_sd_vals <- c(score_sd_vals, w$score$sd)
+        }
+      }
+      
+      return(list(x_z = x_z_vals, score_sd = score_sd_vals, n_windows = length(result$windows)))
+      
+    }, error = function(e) {
+      # Return error info for debugging
+      return(list(x_z = numeric(0), score_sd = numeric(0), error = e$message))
+    })
+  }, .options = furrr_options(seed = TRUE, globals = list(raw_datasets = raw_datasets, window_size = window_size)))
+  
+  # Combine results from all datasets
+  all_x_z <- unlist(purrr::map(results, "x_z"))
+  all_score_sd <- unlist(purrr::map(results, "score_sd"))
   
   cat("  ✓ Extracted", length(all_x_z), "data points for window size", window_size, "\n")
   return(list(x_z = all_x_z, score_sd = all_score_sd))
@@ -178,20 +219,21 @@ for (i in seq_along(WINDOW_SIZES)) {
       next
     }
     
-    # Calculate reliability metrics (this is the analytical part!)
-    metrics <- calculate_reliability_metrics_optimized(
-      window_data$x_z, window_data$score_sd, RELIABILITY_THRESHOLDS
+    # Store raw data only (zone calculations moved to step 3)
+    basic_metrics <- list(
+      window_size = window_size,
+      n_datapoints = length(window_data$x_z),
+      x_z_data = window_data$x_z,
+      score_sd_data = window_data$score_sd,
+      x_range = range(window_data$x_z, na.rm = TRUE),
+      baseline_volatility = mean(abs(window_data$score_sd), na.rm = TRUE)
     )
     
     # Store results
-    all_results[[paste0("window_", window_size)]] <- c(
-      list(window_size = window_size, n_datapoints = length(window_data$x_z)),
-      metrics
-    )
+    all_results[[paste0("window_", window_size)]] <- basic_metrics
     
-    # Print summary
-    print_reliability_summary(window_size, metrics)
-    cat("✅ Window size", window_size, "complete!\n")
+    cat("✅ Window size", window_size, "complete! Collected", length(window_data$x_z), "data points\n")
+    cat("    x_z range: [", round(basic_metrics$x_range[1], 3), ",", round(basic_metrics$x_range[2], 3), "]\n")
     
   }, error = function(e) {
     cat("❌ Window size", window_size, "failed:", e$message, "\n")
@@ -220,33 +262,34 @@ if (length(failed_analyses) > 0) {
 }
 
 if (length(all_results) > 0) {
-  cat("\n💾 SAVING RESULTS...\n")
+  cat("\n💾 SAVING RAW DATA...\n")
   
   tryCatch({
-    saved_files <- save_reliability_results(all_results, "multi_window_reliability")
+    # Save raw collected data (no zone analysis yet)
+    saveRDS(all_results, OUTPUT_DETAILED)
     
-    cat("✓ Saved detailed results:", saved_files$rds_file, "\n")
-    cat("✓ Saved summary table:", saved_files$csv_file, "\n")
+    # Create basic summary table
+    summary_data <- data.frame(
+      window_size = sapply(all_results, function(x) x$window_size),
+      n_datapoints = sapply(all_results, function(x) x$n_datapoints),
+      baseline_volatility = sapply(all_results, function(x) x$baseline_volatility),
+      x_range_min = sapply(all_results, function(x) x$x_range[1]),
+      x_range_max = sapply(all_results, function(x) x$x_range[2])
+    )
     
-    # Show quick summary
-    cat("\n📊 QUICK SUMMARY:\n")
-    summary_table <- saved_files$summary_table
-    if ("zone_90_width" %in% names(summary_table)) {
-      zone_data <- summary_table[, c("window_size", "zone_90_width")]
-      zone_data <- zone_data[order(zone_data$window_size), ]
-      zone_data <- zone_data[!is.na(zone_data$zone_90_width), ]
-      
-      if (nrow(zone_data) > 0) {
-        cat("90% Reliability Zone Widths:\n")
-        for (i in seq_len(min(5, nrow(zone_data)))) {
-          cat(sprintf("  Window %3d: %.3f\n", zone_data$window_size[i], zone_data$zone_90_width[i]))
-        }
-        
-        # Find best
-        best_idx <- which.min(zone_data$zone_90_width)
-        cat(sprintf("\n🏆 BEST: Window size %d (zone width = %.3f)\n", 
-                   zone_data$window_size[best_idx], zone_data$zone_90_width[best_idx]))
-      }
+    write.csv(summary_data, OUTPUT_SUMMARY, row.names = FALSE)
+    
+    cat("✓ Saved raw data:", OUTPUT_DETAILED, "\n")
+    cat("✓ Saved basic summary:", OUTPUT_SUMMARY, "\n")
+    
+    # Show data collection summary
+    cat("\n📊 DATA COLLECTION SUMMARY:\n")
+    for (i in seq_len(min(5, nrow(summary_data)))) {
+      cat(sprintf("  Window %3d: %d data points, x-range [%.3f, %.3f]\n", 
+                 summary_data$window_size[i], 
+                 summary_data$n_datapoints[i],
+                 summary_data$x_range_min[i],
+                 summary_data$x_range_max[i]))
     }
     
   }, error = function(e) {
@@ -256,92 +299,12 @@ if (length(all_results) > 0) {
   cat("⚠️ No results to save\n")
 }
 
-cat("\n🎯 NEXT STEP: Run '03_view_results.R' to see detailed results\n")
+cat("\n🎯 NEXT STEP: Run '03_view_results.R' to calculate zones and see detailed results\n")
+cat("📊 The zone analysis (95% reliability, etc.) will be done in step 3 for efficiency\n")
 
-# Clean up
+# Clean up parallel processing and memory
+future::plan(future::sequential)  # Reset to sequential processing
 rm(list = ls())
 gc()
-validate_data_format(datasets)
-
-# ========================================
-# RUN ANALYSIS
-# ========================================
-
-cat("\n--- Starting Reliability Analysis ---\n")
-start_time <- Sys.time()
-
-# Run the main analysis
-results <- analyze_reliability(
-  datasets = datasets,
-  window_size = WINDOW_SIZE,
-  reliability_thresholds = RELIABILITY_THRESHOLDS,
-  batch_size = BATCH_SIZE
-)
-
-end_time <- Sys.time()
-analysis_duration <- as.numeric(difftime(end_time, start_time, units = "mins"))
-
-cat("\n✓ Analysis completed in", round(analysis_duration, 2), "minutes\n")
-
-# ========================================
-# DISPLAY RESULTS
-# ========================================
-
-# Print summary to console
-print_analysis_summary(results)
-
-# ========================================
-# SAVE RESULTS
-# ========================================
-
-cat("Saving results...\n")
-saved_files <- save_reliability_results(results, OUTPUT_NAME)
 
 cat("\n=== ANALYSIS COMPLETE ===\n")
-cat("Results saved as:\n")
-cat("- Detailed results:", saved_files$detailed, "\n")
-cat("- Summary table:", saved_files$summary, "\n")
-
-# Show summary table
-cat("\nSummary Table:\n")
-print(saved_files$summary_data)
-
-cat("\nNext step: Run '03_view_results.R' to create visualizations\n\n")
-
-# ========================================
-# INTERPRETATION GUIDE
-# ========================================
-
-cat("📊 How to interpret your results:\n\n")
-
-cat("1. MODEL QUALITY (R²):\n")
-if (results$model_rsq > 0.1) {
-  cat("   ✓ Good: Your model shows clear patterns (R² =", round(results$model_rsq, 3), ")\n")
-} else if (results$model_rsq > 0.01) {
-  cat("   ⚠ Moderate: Some patterns detected (R² =", round(results$model_rsq, 3), ")\n")
-} else {
-  cat("   ❌ Poor: Very flat model, little pattern (R² =", round(results$model_rsq, 3), ")\n")
-}
-
-cat("\n2. RELIABILITY ZONES:\n")
-for (zone_name in names(results$zones)) {
-  zone_info <- results$zones[[zone_name]]
-  threshold_pct <- gsub("zone_", "", zone_name)
-  
-  if (!is.na(zone_info$width)) {
-    if (zone_info$width < 1.0) {
-      cat("   ✓", threshold_pct, "%: Very precise zone (width =", round(zone_info$width, 3), ")\n")
-    } else if (zone_info$width < 3.0) {
-      cat("   ✓", threshold_pct, "%: Reasonable precision (width =", round(zone_info$width, 3), ")\n")
-    } else {
-      cat("   ⚠", threshold_pct, "%: Large zone, less precise (width =", round(zone_info$width, 3), ")\n")
-    }
-  } else {
-    cat("   ❌", threshold_pct, "%: Threshold not achievable with this data\n")
-  }
-}
-
-cat("\n3. NEXT STEPS:\n")
-cat("   - Run '03_view_results.R' to see plots\n")
-cat("   - Run '04_compare_window_sizes.R' to find optimal window size\n")
-cat("   - Adjust WINDOW_SIZE or RELIABILITY_THRESHOLDS and re-run if needed\n\n")

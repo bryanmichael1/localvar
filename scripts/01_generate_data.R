@@ -29,29 +29,49 @@ cat("- Points per dataset:", N_POINTS, "\n")
 cat("- Output file:", OUTPUT_FILE, "\n\n")
 
 # ========================================
-# GENERATE DATA
+# GENERATE DATA (with Winsorized T-Distribution + Sinusoidal Signal)
 # ========================================
 
-cat("Generating", N_DATASETS, "datasets... (this may take a few minutes)\n")
+cat("Generating", N_DATASETS, "datasets with winsorized t-distribution and sinusoidal signal...\n")
+cat("(This may take a few minutes)\n")
 start_time <- Sys.time()
 
-# Generate datasets with t-distribution (more realistic than normal)
-datasets <- list()
+# Set seed for reproducibility
+set.seed(123)
 
-for (i in 1:N_DATASETS) {
+# Define simstudy structure (using the package properly)
+def <- defData(varname = "x_placeholder", dist = "normal", formula = 0, variance = 1)
+
+# Generate datasets using the original sophisticated method
+datasets <- lapply(1:N_DATASETS, function(i) {
   if (i %% 100 == 0) {
     cat("  Generated", i, "/", N_DATASETS, "datasets\n")
   }
   
-  # Create one dataset
-  dataset <- data.frame(
-    sim_id = i,
-    x = rt(N_POINTS, df = 3),  # t-distribution with 3 degrees of freedom
-    y_norm = rt(N_POINTS, df = 3)  # independent t-distributed y values
-  )
+  # Generate base dataset using simstudy
+  dt <- genData(N_POINTS, def)
   
-  datasets[[i]] <- dataset
-}
+  # Replace placeholder with t-distributed x (df = 2.5 for heavier tails)
+  dt[, x := rt(.N, df = 2.5)]
+  
+  # WINSORIZE: Keep values within ±4 (crucial for stability)
+  repeat {
+    extreme_indices <- which(abs(dt$x) > 4)
+    if (length(extreme_indices) == 0) break
+    # Replace extreme values with new t-distributed draws
+    dt[extreme_indices, x := rt(length(extreme_indices), df = 3)]
+  }
+  
+  # Generate outcome: SINUSOIDAL SIGNAL + t-distributed noise
+  # This creates the volatility patterns the analysis is designed to detect!
+  dt[, y_norm := sin(x) + rt(.N, df = 3) * 0.3]
+  
+  # Add simulation ID and clean up
+  dt[, sim_id := i]
+  dt[, x_placeholder := NULL]
+  
+  return(dt)
+})
 
 total_time <- round(as.numeric(difftime(Sys.time(), start_time, units = "mins")), 2)
 

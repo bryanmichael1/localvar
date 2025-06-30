@@ -106,7 +106,7 @@ compute_window_x_stats <- function(x) {
   list(
     mean = mean(x, na.rm = TRUE),
     sd = sd(x, na.rm = TRUE),
-    mean_z = mean(scale(x), na.rm = TRUE)  # Standardized mean
+    mean_z = mean(x, na.rm = TRUE)  # Use actual mean, not scaled mean
   )
 }
 

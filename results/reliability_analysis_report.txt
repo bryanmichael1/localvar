@@ -1,23 +1,72 @@
-# LOCALVAR Reliability Analysis Report
-Generated: 2025-06-30 10:43:04.324841
+RELIABILITY ANALYSIS REPORT
+============================
+Generated: 2025-06-30 13:59:42.20796
 
-## Summary
-- Window sizes analyzed: 3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100
-- Total data points: 11340000
-- Average model R²: 0.0173
+SUMMARY OF FINDINGS:
+-------------------
+• Tested window sizes: 3 to 100
+• Total configurations analyzed: 11
+• Optimal window size: 100
+• Maximum baseline volatility: 0.67
 
-## Key Findings
-### Best performing window size (90% zone width):
-- Window size: 40
-- Zone width: 3.492
-- Baseline: 0.3701
-- R²: 0.0107
+DETAILED RESULTS BY WINDOW SIZE:
+--------------------------------
+Window Size: 3
+  Baseline Volatility: 0.26
+  Model Quality: 0.021
 
-### Zone Width Statistics (90% reliability):
-- Min.: 2.027
-- 1st Qu.: 2.078
-- Median: 2.092
-- Mean: 2.313
-- 3rd Qu.: 2.229
-- Max.: 3.492
+Window Size: 5
+  Baseline Volatility: 0.415
+  Model Quality: 0.025
 
+Window Size: 10
+  Baseline Volatility: 0.539
+  Model Quality: 0.014
+
+Window Size: 15
+  Baseline Volatility: 0.586
+  Model Quality: 0.008
+
+Window Size: 20
+  Baseline Volatility: 0.611
+  Model Quality: 0.005
+
+Window Size: 25
+  Baseline Volatility: 0.626
+  Model Quality: 0.004
+
+Window Size: 30
+  Baseline Volatility: 0.636
+  Model Quality: 0.003
+
+Window Size: 40
+  Baseline Volatility: 0.648
+  Model Quality: 0.002
+
+Window Size: 50
+  Baseline Volatility: 0.655
+  Model Quality: 0.001
+
+Window Size: 75
+  Baseline Volatility: 0.665
+  Model Quality: 0
+
+Window Size: 100
+  Baseline Volatility: 0.67
+  Model Quality: 0
+
+RECOMMENDATIONS:
+----------------
+• Use window size 100 for best overall reliability
+• Check the reliability heatmap for regional patterns
+• Consider zone width requirements for your specific use case
+
+FILES GENERATED:
+---------------
+• reliability_heatmap.png - Overview of reliability patterns
+• model_quality.png - Model performance by window size
+• baseline_reliability.png - Reliability trends
+• zone_width_*.png - Reliable zone analyses
+• reliability_curve_*.png - Detailed curve for optimal window
+
+For more details, see the CSV summary and individual plot files.
