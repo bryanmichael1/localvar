@@ -18,6 +18,11 @@ test_*
 *.bak
 
 # Analysis Results (comment out if you want to track these)
+# Large generated data files (recreate with scripts)
+data/multi_window_reliability_detailed.rds
+data/*_detailed.rds
+
+# Other analysis outputs
 # *.rds
 # plots/
 # *.csv
