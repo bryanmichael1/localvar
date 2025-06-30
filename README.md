@@ -44,6 +44,14 @@ source("scripts/04_compare_window_sizes.R")
 └── 📂 archive_old_complex_files/   # Legacy files and old scripts
 ```
 
+## 💾 Data Files Note
+
+**Important**: Large result files (`data/*_detailed.rds`) are excluded from Git tracking to keep the repository lightweight. These files are automatically generated when you run the analysis scripts. If you're setting up this project for the first time:
+
+1. Run `scripts/01_generate_data.R` to create initial datasets
+2. Run `scripts/02_analyze_reliability.R` to generate analysis results
+3. The detailed result files will be created automatically
+
 ## ⚙️ Key Settings You Can Adjust
 
 The main analysis script `scripts/02_analyze_reliability.R` contains key parameters:
