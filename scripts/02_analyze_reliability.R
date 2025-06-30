@@ -295,8 +295,10 @@ if (length(all_results) > 0) {
   cat("⚠️ No results to save\n")
 }
 
-cat("\n🎯 NEXT STEP: Run '03_view_results.R' to calculate zones and see detailed results\n")
-cat("📊 The zone analysis (95% reliability, etc.) will be done in step 3 for efficiency\n")
+cat("\n🎯 NEXT STEPS:\n")
+cat("• Run '03_view_results.R' to analyze ONE specific window size in detail\n")
+cat("• Run '04_compare_window_sizes.R' to analyze ALL window sizes and find optimal\n")
+cat("📊 Scripts 03 & 04 will calculate reliability zones from this raw data\n")
 
 # Clean up parallel processing and memory
 future::plan(future::sequential)  # Reset to sequential processing

@@ -1,9 +1,8 @@
 # ========================================
 # STEP 4: COMPARE ALL WINDOW SIZES
 # ========================================
-# Creates plots and summary tables comparing all window sizes
-# Shows which window size gives the most precise results
-# Uses the single-window analysis function to generate detailed comparisons
+# Runs single-window analysis for ALL window sizes, then compares them
+# This extends script 03 by applying it to multiple windows and finding the optimal one
 
 # Clear workspace and load packages
 rm(list = ls())
@@ -26,38 +25,99 @@ RELIABILITY_THRESHOLDS <- c(0.95, 0.90, 0.85, 0.80)  # You can modify these
 
 # Input files (from Step 2)
 DETAILED_FILE <- "data/multi_window_reliability_detailed.rds"
-SUMMARY_FILE <- "results/multi_window_reliability_summary.csv"
 
 cat("Reliability thresholds:", paste(RELIABILITY_THRESHOLDS * 100, collapse = "%, "), "%\n")
-cat("Reading from:", SUMMARY_FILE, "\n\n")
+cat("Reading from:", DETAILED_FILE, "\n\n")
 
 # ========================================
-# LOAD RESULTS
+# LOAD RAW DATA AND GET AVAILABLE WINDOW SIZES
 # ========================================
 
-if (!file.exists(SUMMARY_FILE)) {
-  stop("❌ Summary file not found: ", SUMMARY_FILE, 
+if (!file.exists(DETAILED_FILE)) {
+  stop("❌ Detailed results not found: ", DETAILED_FILE, 
        "\n🔧 Run '02_analyze_reliability.R' first!")
 }
 
-cat("Loading comparison data...\n")
-summary_table <- read.csv(SUMMARY_FILE)
-cat("✓ Loaded data for", nrow(summary_table), "window sizes\n")
+cat("Loading raw data...\n")
+raw_results <- readRDS(DETAILED_FILE)
+window_sizes <- sapply(raw_results, function(x) x$window_size)
+cat("✓ Found data for", length(window_sizes), "window sizes:", paste(sort(window_sizes), collapse = ", "), "\n\n")
 
 # ========================================
-# SUMMARY TABLE
+# RUN SINGLE-WINDOW ANALYSIS FOR ALL WINDOW SIZES
 # ========================================
 
-cat("\n", rep("=", 80), "\n", sep = "")
+cat("🔄 RUNNING ANALYSIS FOR ALL WINDOW SIZES...\n")
+cat("This extends script 03 by analyzing all windows systematically\n\n")
+
+all_window_results <- list()
+summary_data <- data.frame()
+
+for (i in seq_along(window_sizes)) {
+  window_size <- window_sizes[i]
+  
+  cat("📊 Analyzing window size", window_size, paste0("(", i, "/", length(window_sizes), ")"), "...\n")
+  
+  tryCatch({
+    # Run the same single-window analysis as script 03
+    window_analysis <- generate_single_window_analysis(
+      window_size = window_size,
+      detailed_results = raw_results,
+      output_prefix = "multi_window",
+      reliability_thresholds = RELIABILITY_THRESHOLDS
+    )
+    
+    # Store the results
+    all_window_results[[paste0("window_", window_size)]] <- window_analysis
+    
+    # Extract summary data for comparison
+    window_data <- window_analysis$window_data
+    summary_row <- data.frame(
+      window_size = window_size,
+      n_datapoints = length(window_data$x_z_data),
+      model_rsq = window_data$model_rsq,
+      baseline_volatility = window_data$baseline_volatility
+    )
+    
+    # Add zone widths if available
+    if ("zones" %in% names(window_data)) {
+      for (zone_name in names(window_data$zones)) {
+        zone <- window_data$zones[[zone_name]]
+        width_col <- paste0(zone_name, "_width")
+        summary_row[[width_col]] <- if (is.na(zone$width)) NA else zone$width
+      }
+    }
+    
+    summary_data <- rbind(summary_data, summary_row)
+    
+    cat("  ✓ Complete! Model R² =", round(window_data$model_rsq, 4), "\n")
+    
+  }, error = function(e) {
+    cat("  ❌ Failed:", e$message, "\n")
+  })
+}
+
+cat("\n✅ ANALYSIS COMPLETE FOR ALL WINDOW SIZES!\n")
+cat("Generated detailed analysis for", nrow(summary_data), "window sizes\n\n")
+
+# Save the comprehensive summary
+write.csv(summary_data, "results/multi_window_reliability_summary.csv", row.names = FALSE)
+cat("💾 Saved comprehensive summary: multi_window_reliability_summary.csv\n\n")
+
+# ========================================
+# DISPLAY COMPARISON SUMMARY
+# ========================================
+
+cat(rep("=", 80), "\n", sep = "")
 cat("📊 WINDOW SIZE COMPARISON SUMMARY\n")
 cat(rep("=", 80), "\n", sep = "")
 
 # Display key columns
 display_cols <- c("window_size", "n_datapoints", "model_rsq", "zone_90pct_width", "zone_95pct_width")
-available_cols <- display_cols[display_cols %in% names(summary_table)]
+available_cols <- display_cols[display_cols %in% names(summary_data)]
 
 if (length(available_cols) > 0) {
-  display_data <- summary_table[, available_cols, drop = FALSE]
+  display_data <- summary_data[, available_cols, drop = FALSE]
   display_data <- display_data[order(display_data$window_size), ]
   
   cat("\nWindow | Data Points | R²     | 90% Zone | 95% Zone\n")
@@ -105,8 +165,8 @@ for (i in seq_along(reliability_cols)) {
   col_name <- reliability_cols[i]
   rel_name <- reliability_names[i]
   
-  if (col_name %in% names(summary_table)) {
-    valid_data <- summary_table[is.finite(summary_table[[col_name]]), ]
+  if (col_name %in% names(summary_data)) {
+    valid_data <- summary_data[is.finite(summary_data[[col_name]]), ]
     
     if (nrow(valid_data) > 0) {
       best_idx <- which.min(valid_data[[col_name]])
@@ -135,10 +195,10 @@ for (i in seq_along(reliability_cols)) {
 cat("📈 CREATING COMPARISON PLOTS...\n")
 
 # Plot 1: Zone widths comparison
-if (any(c("zone_90pct_width", "zone_95pct_width") %in% names(summary_table))) {
+if (any(c("zone_90pct_width", "zone_95pct_width") %in% names(summary_data))) {
   
   # Prepare data for plotting
-  plot_data <- summary_table %>%
+  plot_data <- summary_data %>%
     select(window_size, contains("zone_")) %>%
     pivot_longer(cols = -window_size, names_to = "threshold", values_to = "width") %>%
     filter(!is.na(width) & is.finite(width)) %>%
@@ -175,8 +235,8 @@ if (any(c("zone_90pct_width", "zone_95pct_width") %in% names(summary_table))) {
 }
 
 # Plot 2: Model quality (R²) comparison
-if ("model_rsq" %in% names(summary_table)) {
-  p2 <- ggplot(summary_table, aes(x = window_size, y = model_rsq)) +
+if ("model_rsq" %in% names(summary_data)) {
+  p2 <- ggplot(summary_data, aes(x = window_size, y = model_rsq)) +
     geom_line(color = "blue", linewidth = 1.2) +
     geom_point(color = "blue", size = 3) +
     labs(
@@ -192,50 +252,11 @@ if ("model_rsq" %in% names(summary_table)) {
       axis.title = element_text(size = 12),
       axis.text = element_text(size = 10)
     ) +
-    scale_x_continuous(breaks = unique(summary_table$window_size)) +
-    ylim(0, max(summary_table$model_rsq, na.rm = TRUE) * 1.1)
+    scale_x_continuous(breaks = unique(summary_data$window_size)) +
+    ylim(0, max(summary_data$model_rsq, na.rm = TRUE) * 1.1)
   
   ggsave("results/model_quality_comparison.png", p2, width = 10, height = 6, dpi = 300)
   cat("✓ Saved model quality comparison: model_quality_comparison.png\n")
-}
-
-# ========================================
-# GENERATE DETAILED ANALYSIS FOR OPTIMAL WINDOW
-# ========================================
-
-cat("\n📊 DETAILED ANALYSIS FOR OPTIMAL WINDOW SIZE...\n")
-
-if ("zone_90pct_width" %in% names(summary_table)) {
-  valid_90 <- summary_table[is.finite(summary_table$zone_90pct_width), ]
-  
-  if (nrow(valid_90) > 0) {
-    optimal_window <- valid_90$window_size[which.min(valid_90$zone_90pct_width)]
-    
-    cat("Running detailed analysis for optimal window size:", optimal_window, "\n")
-    
-    # Generate comprehensive single-window analysis for the optimal size
-    tryCatch({
-      optimal_analysis <- generate_single_window_analysis(
-        window_size = optimal_window,
-        output_prefix = "optimal_window",
-        reliability_thresholds = RELIABILITY_THRESHOLDS
-      )
-      
-      cat("✓ Generated detailed plots and report for optimal window size\n")
-      
-      # Show quick summary
-      if ("summary_stats" %in% names(optimal_analysis)) {
-        cat("\n📋 OPTIMAL WINDOW SUMMARY:\n")
-        for (i in seq_len(min(6, nrow(optimal_analysis$summary_stats)))) {
-          stat <- optimal_analysis$summary_stats[i, ]
-          cat(sprintf("  %-20s: %s\n", stat$Metric, stat$Value))
-        }
-      }
-      
-    }, error = function(e) {
-      cat("⚠️ Could not generate detailed analysis:", e$message, "\n")
-    })
-  }
 }
 
 # ========================================
@@ -246,8 +267,8 @@ cat("\n", rep("=", 80), "\n", sep = "")
 cat("💡 RECOMMENDATIONS\n")
 cat(rep("=", 80), "\n", sep = "")
 
-if ("zone_90pct_width" %in% names(summary_table)) {
-  valid_90 <- summary_table[is.finite(summary_table$zone_90pct_width), ]
+if ("zone_90pct_width" %in% names(summary_data)) {
+  valid_90 <- summary_data[is.finite(summary_data$zone_90pct_width), ]
   
   if (nrow(valid_90) > 0) {
     best_90 <- valid_90[which.min(valid_90$zone_90pct_width), ]
@@ -261,6 +282,14 @@ if ("zone_90pct_width" %in% names(summary_table)) {
     cat("- R² =", sprintf("%.4f", best_90$model_rsq), 
         if (best_90$model_rsq > 0.1) "(good model fit)" else "(flat model)\n")
     cat("- Analyzed", best_90$n_datapoints, "data points\n")
+    
+    cat("\n📈 DETAILED ANALYSIS FILES GENERATED:\n")
+    cat("All window sizes have been analyzed with detailed plots and reports!\n")
+    cat("Check the results/ folder for:\n")
+    cat("- multi_window_scatter_*.png - Scatter plots for each window\n")
+    cat("- multi_window_reliability_*.png - Reliability curves\n") 
+    cat("- multi_window_zones_*.png - Zone visualizations\n")
+    cat("- multi_window_report_*.txt - Detailed text reports\n")
   }
 }
 
@@ -269,8 +298,13 @@ cat("- Smaller zone widths = more precise reliability estimates\n")
 cat("- Higher R² = better model quality\n")
 cat("- Consider your specific application's precision needs\n")
 
-cat("\n🎯 NEXT STEP: Use the optimal window size in your main analysis!\n")
+cat("\n🎯 RECOMMENDED WORKFLOW:\n")
+cat("1. Use this script (04) to find optimal window size across all options\n")
+cat("2. Use script 03 to do deep-dive analysis on your chosen window size\n")
+cat("3. Focus your main analysis on the reliable zones identified\n")
 
 cat("\n", rep("=", 80), "\n", sep = "")
-cat("✅ COMPARISON COMPLETE - Check the generated plots!\n")
+cat("✅ MULTI-WINDOW COMPARISON COMPLETE!\n")
+cat("📊 Analyzed", length(window_sizes), "window sizes with detailed reports\n")
+cat("📈 Generated comparison plots and identified optimal settings\n")
 cat(rep("=", 80), "\n", sep = "")
